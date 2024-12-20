@@ -109,9 +109,13 @@ async def scrape_mod_details(mod_url):
             # Suche nach den relevanten Informationen in der Tabelle
             try:
                 # Version und Veröffentlichungsdatum sind in der Tabelle unter "Version" und "Veröffentlichung"
-                version = soup.find('div', class_='table-row', string='Version').find_next('div', class_='table-cell').text.strip()
-                release_date = soup.find('div', class_='table-row', string='Veröffentlichung').find_next('div', class_='table-cell').text.strip()
-                author = soup.find('div', class_='table-row', string='Autor').find_next('div', class_='table-cell').text.strip()
+                version_row = soup.find('div', class_='table-row', string='Version')
+                release_row = soup.find('div', class_='table-row', string='Veröffentlichung')
+
+                version = version_row.find_next('div', class_='table-cell').text.strip() if version_row else "Unbekannt"
+                release_date = release_row.find_next('div', class_='table-cell').text.strip() if release_row else "Unbekannt"
+                author_row = soup.find('div', class_='table-row', string='Autor')
+                author = author_row.find_next('div', class_='table-cell').text.strip() if author_row else "Unbekannt"
             except AttributeError as e:
                 print(f"Fehler beim Extrahieren der Details: {e}")
                 return None
@@ -195,7 +199,8 @@ async def check_mods():
 
 @bot.event
 async def on_ready():
-    print(f"Bot ist eingeloggt als {bot.user}")
-    check_mods.start()  # Starte den Bot und beginne mit dem Scraping
+    print(f"Bot {bot.user} ist eingeloggt!")
+    check_mods.start()
 
-bot.run(os.getenv("BOT_TOKEN"))  # Ersetze DEIN_BOT_TOKEN mit deinem tatsächlichen Token
+# Starte den Bot
+bot.run(os.getenv("BOT_TOKEN"))
