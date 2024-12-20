@@ -48,7 +48,7 @@ async def get_total_pages():
 
             return 1  # Falls keine Paginierung gefunden wurde, gehe von 1 Seite aus
 
-# Scrape die Mods einer bestimmten Seite
+# Scrape die Mods einer bestimmten Seite und suche nach "NEW!" oder "UPDATE!" Labels
 async def scrape_mods(page_num=1):
     url = f"https://www.farming-simulator.com/mods.php?title=fs2025&filter=latest&page={page_num}"
 
@@ -77,16 +77,38 @@ async def scrape_mods(page_num=1):
                 elif mod.select_one(".mod-label-update"):
                     label = "UPDATE!"
 
-                mods.append({
-                    "name": name,
-                    "image": image_url,
-                    "creator": creator,
-                    "link": mod_link,
-                    "label": label  # Füge das Label hinzu
-                })
+                if label:  # Nur Mods mit den Labels "NEW!" oder "UPDATE!" hinzufügen
+                    mods.append({
+                        "name": name,
+                        "image": image_url,
+                        "creator": creator,
+                        "link": mod_link,
+                        "label": label  # Füge das Label hinzu
+                    })
 
             print(f"Gefundene Mods auf Seite {page_num}: {len(mods)}")
             return mods
+
+# Scrape Details der Mod-Seite
+async def scrape_mod_details(mod_link):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(mod_link) as response:
+            if response.status != 200:
+                return None
+
+            text = await response.text()
+            soup = BeautifulSoup(text, 'html.parser')
+
+            # Beispiel für zusätzliche Mod-Daten:
+            description = soup.select_one(".mod-description")  # Beispiel für Beschreibung
+            mod_description = description.get_text(strip=True) if description else "Keine Beschreibung verfügbar"
+            version = soup.select_one(".mod-version")  # Beispiel für Version
+            mod_version = version.get_text(strip=True) if version else "Keine Version verfügbar"
+
+            return {
+                "description": mod_description,
+                "version": mod_version
+            }
 
 # Hauptschleife, die regelmäßig nach neuen Mods sucht
 @tasks.loop(minutes=30)  # Alle 30 Minuten nach neuen Mods suchen
@@ -113,14 +135,23 @@ async def check_mods():
     
     # Filtere Mods, die entweder "UPDATE!"-Label haben oder noch nicht bekannt sind
     for mod in mods:
-        if mod["label"] == "UPDATE!" and mod["link"] not in last_known_mods["updates"]:
-            # Füge Updates nur einmal hinzu
+        mod_details = await scrape_mod_details(mod["link"])  # Detaillierte Mod-Info scrapen
+        if mod_details:
+            mod["description"] = mod_details["description"]
+            mod["version"] = mod_details["version"]
+        
+        # Vergleiche Mods mit den bekannten Mods in last_known_mods
+        mod_data = {"name": mod["name"], "version": mod["version"]}
+        
+        if mod["label"] == "UPDATE!" and mod_data not in last_known_mods["updates"]:
+            # Füge Updates nur einmal hinzu, wenn Name und Version sich ändern
             new_mods.append(mod)
-            last_known_mods["updates"].append(mod["link"])
-        elif mod["label"] == "NEW!" and mod["link"] not in last_known_mods["new"]:
-            # Füge neue Mods nur hinzu, wenn sie noch nicht gepostet wurden
+            last_known_mods["updates"].append(mod_data)
+        
+        elif mod["label"] == "NEW!" and mod_data not in last_known_mods["new"]:
+            # Füge neue Mods nur hinzu, wenn Name und Version sich ändern
             new_mods.append(mod)
-            last_known_mods["new"].append(mod["link"])
+            last_known_mods["new"].append(mod_data)
 
     print(f"Neue Mods und Updates gefunden: {len(new_mods)}")
 
@@ -136,6 +167,10 @@ async def check_mods():
 
         # Ersteller des Mods als Feld hinzufügen
         embed.add_field(name="Ersteller", value=mod['creator'], inline=False)
+
+        # Beschreibung und Version des Mods hinzufügen (aus Detailseite)
+        embed.add_field(name="Beschreibung", value=mod['description'], inline=False)
+        embed.add_field(name="Version", value=mod['version'], inline=False)
 
         # ModHub-Link als Feld hinzufügen
         embed.add_field(name="Mehr Infos", value=f"[ModHub Link]({mod['link']})", inline=False)
