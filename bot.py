@@ -12,7 +12,7 @@ CHANNEL_ID = int(os.getenv("CHANNEL_ID", 0))  # Wenn CHANNEL_ID nicht gesetzt, w
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-last_known_mods = []
+last_known_mods = {"new": [], "updates": []}  # Struktur für bekannte neue Mods und Updates
 
 # Lade die gespeicherten Mods, falls vorhanden
 def load_last_known_mods():
@@ -113,12 +113,18 @@ async def check_mods():
     
     # Filtere Mods, die entweder "UPDATE!"-Label haben oder noch nicht bekannt sind
     for mod in mods:
-        if mod["label"] == "UPDATE!" or mod not in last_known_mods:
-            new_mods.append(mod)  # Wenn "UPDATE!"-Label oder Mod nicht in last_known_mods
+        if mod["label"] == "UPDATE!" and mod["link"] not in last_known_mods["updates"]:
+            # Füge Updates nur einmal hinzu
+            new_mods.append(mod)
+            last_known_mods["updates"].append(mod["link"])
+        elif mod["label"] == "NEW!" and mod["link"] not in last_known_mods["new"]:
+            # Füge neue Mods nur hinzu, wenn sie noch nicht gepostet wurden
+            new_mods.append(mod)
+            last_known_mods["new"].append(mod["link"])
 
-    print(f"Neue Mods gefunden: {len(new_mods)}")  # Ausgabe, um zu sehen, ob neue Mods gefunden wurden
+    print(f"Neue Mods und Updates gefunden: {len(new_mods)}")
 
-    # Wenn neue Mods gefunden wurden, sende sie in den Discord-Kanal
+    # Wenn neue Mods oder Updates gefunden wurden, sende sie in den Discord-Kanal
     for mod in new_mods:
         embed = discord.Embed(
             title=mod["label"],  # Der Titel ist jetzt das Label ("NEW!" oder "UPDATE!")
@@ -141,8 +147,7 @@ async def check_mods():
         await channel.send(embed=embed)
 
     if new_mods:
-        last_known_mods = mods
-        save_last_known_mods()  # Speichere die Liste der bekannten Mods
+        save_last_known_mods()  # Speichere die Liste der bekannten Mods und Updates
 
 # Event, das ausgeführt wird, wenn der Bot online ist
 @bot.event
