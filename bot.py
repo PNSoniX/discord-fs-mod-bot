@@ -7,16 +7,10 @@ import json
 from urllib.parse import urljoin
 import hashlib
 
-# Setze die Channel-ID aus Umgebungsvariablen
+# Setze die Channel-ID aus Umgebungsvariablen (oder direkt im Code, falls nötig)
 CHANNEL_ID = int(os.getenv("CHANNEL_ID", 0))  # Wenn CHANNEL_ID nicht gesetzt, wird 0 verwendet
 
-# Setze den Bot-Token aus Umgebungsvariablen
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # Hole den Bot-Token aus der Umgebungsvariable
-
-# Falls der Bot-Token nicht gesetzt ist, raise einen Fehler
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN ist nicht gesetzt! Bitte die Umgebungsvariable 'BOT_TOKEN' setzen.")
-
+# Setze das Bot-Token aus den Umgebungsvariablen
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -106,26 +100,27 @@ async def scrape_mod_details(mod_url):
     async with aiohttp.ClientSession() as session:
         async with session.get(mod_url) as response:
             if response.status != 200:
+                print(f"Fehler beim Abrufen der Mod-Details von {mod_url}")
                 return None  # Rückgabe von None, wenn ein Fehler auftritt
 
             text = await response.text()
             soup = BeautifulSoup(text, 'html.parser')
 
-            # Suche nach den relevanten Informationen
-            author = soup.select_one("div.table-row:contains('Autor') .table-cell a")
-            version = soup.select_one("div.table-row:contains('Version') .table-cell")
-            release_date = soup.select_one("div.table-row:contains('Veröffentlichung') .table-cell")
+            # Suche nach den relevanten Informationen in der Tabelle
+            try:
+                # Version und Veröffentlichungsdatum sind in der Tabelle unter "Version" und "Veröffentlichung"
+                version = soup.find('div', class_='table-row', string='Version').find_next('div', class_='table-cell').text.strip()
+                release_date = soup.find('div', class_='table-row', string='Veröffentlichung').find_next('div', class_='table-cell').text.strip()
+                author = soup.find('div', class_='table-row', string='Autor').find_next('div', class_='table-cell').text.strip()
+            except AttributeError as e:
+                print(f"Fehler beim Extrahieren der Details: {e}")
+                return None
 
-            # Extrahiere die Daten, wenn sie vorhanden sind
-            author_name = author.get_text(strip=True) if author else "Unbekannt"
-            version_number = version.get_text(strip=True) if version else "Unbekannt"
-            release_date_text = release_date.get_text(strip=True) if release_date else "Unbekannt"
-
-            # Rückgabe als Dictionary
+            # Rückgabe der gescrapeten Details
             return {
-                "author": author_name,
-                "version": version_number,
-                "release_date": release_date_text
+                "author": author if author else "Unbekannt",
+                "version": version if version else "Unbekannt",
+                "release_date": release_date if release_date else "Unbekannt"
             }
 
 # Hauptschleife, die regelmäßig nach neuen Mods sucht
@@ -203,4 +198,4 @@ async def on_ready():
     print(f"Bot ist eingeloggt als {bot.user}")
     check_mods.start()  # Starte den Bot und beginne mit dem Scraping
 
-bot.run(os.getenv("BOT_TOKEN"))  # Bot-Token aus der Umgebungsvariable
+bot.run(os.getenv("BOT_TOKEN"))  # Ersetze DEIN_BOT_TOKEN mit deinem tatsächlichen Token
