@@ -12,7 +12,7 @@ CHANNEL_ID = int(os.getenv("CHANNEL_ID", 0))  # Wenn CHANNEL_ID nicht gesetzt, w
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-last_known_mods = {"new": [], "updates": []}  # Struktur für bekannte neue Mods und Updates
+last_known_mods = []
 
 # Lade die gespeicherten Mods, falls vorhanden
 def load_last_known_mods():
@@ -48,7 +48,7 @@ async def get_total_pages():
 
             return 1  # Falls keine Paginierung gefunden wurde, gehe von 1 Seite aus
 
-# Scrape die Mods einer bestimmten Seite und suche nach "NEW!" oder "UPDATE!" Labels
+# Scrape die Mods einer bestimmten Seite
 async def scrape_mods(page_num=1):
     url = f"https://www.farming-simulator.com/mods.php?title=fs2025&filter=latest&page={page_num}"
 
@@ -77,37 +77,41 @@ async def scrape_mods(page_num=1):
                 elif mod.select_one(".mod-label-update"):
                     label = "UPDATE!"
 
-                if label:  # Nur Mods mit den Labels "NEW!" oder "UPDATE!" hinzufügen
-                    mods.append({
-                        "name": name,
-                        "image": image_url,
-                        "creator": creator,
-                        "link": mod_link,
-                        "label": label  # Füge das Label hinzu
-                    })
+                mods.append({
+                    "name": name,
+                    "image": image_url,
+                    "creator": creator,
+                    "link": mod_link,
+                    "label": label  # Füge das Label hinzu
+                })
 
             print(f"Gefundene Mods auf Seite {page_num}: {len(mods)}")
             return mods
 
-# Scrape Details der Mod-Seite
-async def scrape_mod_details(mod_link):
+# Scrape die Mod-Details von der Detailseite des Mods
+async def scrape_mod_details(mod_url):
     async with aiohttp.ClientSession() as session:
-        async with session.get(mod_link) as response:
+        async with session.get(mod_url) as response:
             if response.status != 200:
-                return None
+                return None  # Rückgabe von None, wenn ein Fehler auftritt
 
             text = await response.text()
             soup = BeautifulSoup(text, 'html.parser')
 
-            # Beispiel für zusätzliche Mod-Daten:
-            description = soup.select_one(".mod-description")  # Beispiel für Beschreibung
-            mod_description = description.get_text(strip=True) if description else "Keine Beschreibung verfügbar"
-            version = soup.select_one(".mod-version")  # Beispiel für Version
-            mod_version = version.get_text(strip=True) if version else "Keine Version verfügbar"
+            # Suche nach den relevanten Informationen
+            author = soup.select_one("div.table-row:contains('Autor') .table-cell a")
+            version = soup.select_one("div.table-row:contains('Version') .table-cell")
+            release_date = soup.select_one("div.table-row:contains('Veröffentlichung') .table-cell")
+
+            # Extrahiere die Daten, wenn sie vorhanden sind
+            author_name = author.get_text(strip=True) if author else "Unbekannt"
+            version_number = version.get_text(strip=True) if version else "Unbekannt"
+            release_date_text = release_date.get_text(strip=True) if release_date else "Unbekannt"
 
             return {
-                "description": mod_description,
-                "version": mod_version
+                "author": author_name,
+                "version": version_number,
+                "release_date": release_date_text
             }
 
 # Hauptschleife, die regelmäßig nach neuen Mods sucht
@@ -135,54 +139,42 @@ async def check_mods():
     
     # Filtere Mods, die entweder "UPDATE!"-Label haben oder noch nicht bekannt sind
     for mod in mods:
-        mod_details = await scrape_mod_details(mod["link"])  # Detaillierte Mod-Info scrapen
-        if mod_details:
-            mod["description"] = mod_details["description"]
-            mod["version"] = mod_details["version"]
-        
-        # Vergleiche Mods mit den bekannten Mods in last_known_mods
-        mod_data = {"name": mod["name"], "version": mod["version"]}
-        
-        if mod["label"] == "UPDATE!" and mod_data not in last_known_mods["updates"]:
-            # Füge Updates nur einmal hinzu, wenn Name und Version sich ändern
-            new_mods.append(mod)
-            last_known_mods["updates"].append(mod_data)
-        
-        elif mod["label"] == "NEW!" and mod_data not in last_known_mods["new"]:
-            # Füge neue Mods nur hinzu, wenn Name und Version sich ändern
-            new_mods.append(mod)
-            last_known_mods["new"].append(mod_data)
+        # Wenn das Label "UPDATE!" ist, überprüfen wir die Versionsnummer
+        if mod["label"] == "UPDATE!":
+            mod_details = await scrape_mod_details(mod["link"])
+            if mod_details:
+                # Überprüfe, ob die Version sich geändert hat
+                known_mod = next((m for m in last_known_mods if m["link"] == mod["link"]), None)
+                if known_mod and known_mod["version"] != mod_details["version"]:
+                    new_mods.append({**mod, **mod_details})  # Füge die Mod-Daten und Details hinzu
+        elif mod not in last_known_mods:
+            new_mods.append(mod)  # Wenn der Mod noch nicht bekannt ist, füge ihn hinzu
 
-    print(f"Neue Mods und Updates gefunden: {len(new_mods)}")
+    print(f"Neue Mods gefunden: {len(new_mods)}")  # Ausgabe, um zu sehen, ob neue Mods gefunden wurden
 
-    # Wenn neue Mods oder Updates gefunden wurden, sende sie in den Discord-Kanal
+    # Wenn neue Mods gefunden wurden, sende sie in den Discord-Kanal
     for mod in new_mods:
         embed = discord.Embed(
-            title=mod["label"],  # Der Titel ist jetzt das Label ("NEW!" oder "UPDATE!")
+            title=f"{mod['label']} - {mod['name']}",
+            description=f"Ersteller: {mod['creator']}\nVersion: {mod['version']}\nVeröffentlichung: {mod['release_date']}",
             color=0x00ff00
         )
 
-        # Name des Mods als fett formatierter Text im Beschreibungstext
-        embed.description = f"**{mod['name']}**"  # Der Name des Mods wird fett dargestellt
-
-        # Ersteller des Mods als Feld hinzufügen
-        embed.add_field(name="Ersteller", value=mod['creator'], inline=False)
-
-        # Beschreibung und Version des Mods hinzufügen (aus Detailseite)
-        embed.add_field(name="Beschreibung", value=mod['description'], inline=False)
-        embed.add_field(name="Version", value=mod['version'], inline=False)
-
-        # ModHub-Link als Feld hinzufügen
-        embed.add_field(name="Mehr Infos", value=f"[ModHub Link]({mod['link']})", inline=False)
-
-        # Setze das Bild-URL im Embed, wenn vorhanden
+        # Setze das Bild-URL im Embed
         if mod["image"]:
             embed.set_image(url=mod["image"])
 
+        # Füge das Label hinzu, falls vorhanden
+        if mod["label"]:
+            embed.add_field(name="Label", value=mod["label"], inline=False)
+
+        embed.add_field(name="Mehr Infos", value=f"[ModHub Link]({mod['link']})", inline=False)
         await channel.send(embed=embed)
 
     if new_mods:
-        save_last_known_mods()  # Speichere die Liste der bekannten Mods und Updates
+        # Speichern Sie die aktuellen Mods zusammen mit ihrer Version
+        last_known_mods = mods
+        save_last_known_mods()  # Speichere die Liste der bekannten Mods
 
 # Event, das ausgeführt wird, wenn der Bot online ist
 @bot.event
