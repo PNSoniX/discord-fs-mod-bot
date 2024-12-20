@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 import os
 import json
 from urllib.parse import urljoin
+import hashlib
 
 # Setze die Channel-ID aus Umgebungsvariablen (oder direkt im Code, falls nötig)
 CHANNEL_ID = int(os.getenv("CHANNEL_ID", 0))  # Wenn CHANNEL_ID nicht gesetzt, wird 0 verwendet
@@ -12,19 +13,24 @@ CHANNEL_ID = int(os.getenv("CHANNEL_ID", 0))  # Wenn CHANNEL_ID nicht gesetzt, w
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-last_known_mods = []
+# Hier wird die Mod-Datenbank als JSON-Datei gespeichert
+DATABASE_FILE = "mods_database.json"
 
-# Lade die gespeicherten Mods, falls vorhanden
-def load_last_known_mods():
-    global last_known_mods
-    if os.path.exists("last_known_mods.json"):
-        with open("last_known_mods.json", "r") as file:
-            last_known_mods = json.load(file)
+# Lade die gespeicherten Mods aus der Datenbank, falls vorhanden
+def load_mods_database():
+    if os.path.exists(DATABASE_FILE):
+        with open(DATABASE_FILE, "r") as file:
+            return json.load(file)
+    return {}
 
-# Speichere die aktuellen Mods
-def save_last_known_mods():
-    with open("last_known_mods.json", "w") as file:
-        json.dump(last_known_mods, file)
+# Speichere die Mods in die Datenbank
+def save_mods_database(mods):
+    with open(DATABASE_FILE, "w") as file:
+        json.dump(mods, file)
+
+# Berechne einen einzigartigen Hash für jede Mod, basierend auf dem Link
+def generate_mod_hash(mod_link):
+    return hashlib.md5(mod_link.encode()).hexdigest()
 
 # Bestimme die maximale Seitenzahl
 async def get_total_pages():
@@ -108,6 +114,7 @@ async def scrape_mod_details(mod_url):
             version_number = version.get_text(strip=True) if version else "Unbekannt"
             release_date_text = release_date.get_text(strip=True) if release_date else "Unbekannt"
 
+            # Rückgabe als Dictionary
             return {
                 "author": author_name,
                 "version": version_number,
@@ -117,7 +124,7 @@ async def scrape_mod_details(mod_url):
 # Hauptschleife, die regelmäßig nach neuen Mods sucht
 @tasks.loop(minutes=30)  # Alle 30 Minuten nach neuen Mods suchen
 async def check_mods():
-    global last_known_mods
+    mods_database = load_mods_database()
     channel = bot.get_channel(CHANNEL_ID)
 
     if channel is None:
@@ -139,48 +146,54 @@ async def check_mods():
     
     # Filtere Mods, die entweder "UPDATE!"-Label haben oder noch nicht bekannt sind
     for mod in mods:
+        mod_hash = generate_mod_hash(mod["link"])
+
         # Wenn das Label "UPDATE!" ist, überprüfen wir die Versionsnummer
         if mod["label"] == "UPDATE!":
             mod_details = await scrape_mod_details(mod["link"])
             if mod_details:
-                # Überprüfe, ob die Version sich geändert hat
-                known_mod = next((m for m in last_known_mods if m["link"] == mod["link"]), None)
-                if known_mod and known_mod["version"] != mod_details["version"]:
-                    new_mods.append({**mod, **mod_details})  # Füge die Mod-Daten und Details hinzu
-        elif mod not in last_known_mods:
+                # Wenn der Mod bereits bekannt ist, vergleichen wir die Version
+                if mod_hash in mods_database:
+                    stored_version = mods_database[mod_hash].get("version", "")
+                    if stored_version != mod_details["version"]:
+                        new_mods.append({**mod, **mod_details})  # Füge die Mod-Daten und Details hinzu
+                else:
+                    new_mods.append({**mod, **mod_details})  # Wenn die Mod noch nicht in der DB ist, hinzufügen
+        elif mod_hash not in mods_database:
             new_mods.append(mod)  # Wenn der Mod noch nicht bekannt ist, füge ihn hinzu
 
     print(f"Neue Mods gefunden: {len(new_mods)}")  # Ausgabe, um zu sehen, ob neue Mods gefunden wurden
 
     # Wenn neue Mods gefunden wurden, sende sie in den Discord-Kanal
     for mod in new_mods:
+        creator = mod.get("creator", "Unbekannt")
+        version = mod.get("version", "Unbekannt")
+        release_date = mod.get("release_date", "Unbekannt")
+
         embed = discord.Embed(
             title=f"{mod['label']} - {mod['name']}",
-            description=f"Ersteller: {mod['creator']}\nVersion: {mod['version']}\nVeröffentlichung: {mod['release_date']}",
-            color=0x00ff00
+            description=f"Ersteller: {creator}\nVersion: {version}\nVeröffentlichung: {release_date}",
+            color=discord.Color.blue()
         )
-
-        # Setze das Bild-URL im Embed
-        if mod["image"]:
-            embed.set_image(url=mod["image"])
-
-        # Füge das Label hinzu, falls vorhanden
-        if mod["label"]:
-            embed.add_field(name="Label", value=mod["label"], inline=False)
-
-        embed.add_field(name="Mehr Infos", value=f"[ModHub Link]({mod['link']})", inline=False)
+        embed.set_image(url=mod["image"])
+        embed.add_field(name="Mod-Link", value=mod["link"], inline=False)
+        
+        # Poste die Mod im Discord-Kanal
         await channel.send(embed=embed)
 
-    if new_mods:
-        # Speichern Sie die aktuellen Mods zusammen mit ihrer Version
-        last_known_mods = mods
-        save_last_known_mods()  # Speichere die Liste der bekannten Mods
+        # Speichere den Mod in der Datenbank
+        mods_database[generate_mod_hash(mod["link"])] = {
+            "name": mod["name"],
+            "creator": creator,
+            "version": version,
+            "release_date": release_date
+        }
 
-# Event, das ausgeführt wird, wenn der Bot online ist
+    save_mods_database(mods_database)  # Speichere die Datenbank
+
 @bot.event
 async def on_ready():
-    print(f"Bot ist online als {bot.user}!")
-    load_last_known_mods()  # Lade die gespeicherten Mods
-    check_mods.start()
+    print(f"Bot ist eingeloggt als {bot.user}")
+    check_mods.start()  # Starte den Bot und beginne mit dem Scraping
 
-bot.run(os.getenv("BOT_TOKEN"))
+bot.run("DEIN_BOT_TOKEN")  # Ersetze DEIN_BOT_TOKEN mit deinem tatsächlichen Token
