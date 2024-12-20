@@ -26,6 +26,7 @@ def save_last_known_mods():
     with open("last_known_mods.json", "w") as file:
         json.dump(last_known_mods, file)
 
+# Bestimme die maximale Seitenzahl
 async def get_total_pages():
     url = "https://www.farming-simulator.com/mods.php?title=fs2025&filter=latest&page=1"
     
@@ -47,12 +48,12 @@ async def get_total_pages():
 
             return 1  # Falls keine Paginierung gefunden wurde, gehe von 1 Seite aus
 
+# Scrape die Mods einer bestimmten Seite
 async def scrape_mods(page_num=1):
     url = f"https://www.farming-simulator.com/mods.php?title=fs2025&filter=latest&page={page_num}"
 
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
-            # Wenn die Antwort keinen Inhalt hat, breche ab
             if response.status != 200:
                 return []
 
@@ -87,6 +88,7 @@ async def scrape_mods(page_num=1):
             print(f"Gefundene Mods auf Seite {page_num}: {len(mods)}")
             return mods
 
+# Hauptschleife, die regelmäßig nach neuen Mods sucht
 @tasks.loop(minutes=30)  # Alle 30 Minuten nach neuen Mods suchen
 async def check_mods():
     global last_known_mods
@@ -109,6 +111,7 @@ async def check_mods():
 
     new_mods = []
     
+    # Filtere Mods, die entweder "UPDATE!"-Label haben oder noch nicht bekannt sind
     for mod in mods:
         if mod["label"] == "UPDATE!" or mod not in last_known_mods:
             new_mods.append(mod)  # Wenn "UPDATE!"-Label oder Mod nicht in last_known_mods
@@ -138,6 +141,7 @@ async def check_mods():
         last_known_mods = mods
         save_last_known_mods()  # Speichere die Liste der bekannten Mods
 
+# Event, das ausgeführt wird, wenn der Bot online ist
 @bot.event
 async def on_ready():
     print(f"Bot ist online als {bot.user}!")
