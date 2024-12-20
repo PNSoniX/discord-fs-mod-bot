@@ -7,8 +7,15 @@ import json
 from urllib.parse import urljoin
 import hashlib
 
-# Setze die Channel-ID aus Umgebungsvariablen (oder direkt im Code, falls nötig)
+# Setze die Channel-ID aus Umgebungsvariablen
 CHANNEL_ID = int(os.getenv("CHANNEL_ID", 0))  # Wenn CHANNEL_ID nicht gesetzt, wird 0 verwendet
+
+# Setze den Bot-Token aus Umgebungsvariablen
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Hole den Bot-Token aus der Umgebungsvariable
+
+# Falls der Bot-Token nicht gesetzt ist, raise einen Fehler
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN ist nicht gesetzt! Bitte die Umgebungsvariable 'BOT_TOKEN' setzen.")
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -196,4 +203,4 @@ async def on_ready():
     print(f"Bot ist eingeloggt als {bot.user}")
     check_mods.start()  # Starte den Bot und beginne mit dem Scraping
 
-bot.run("DEIN_BOT_TOKEN")  # Ersetze DEIN_BOT_TOKEN mit deinem tatsächlichen Token
+bot.run(os.getenv("BOT_TOKEN"))  # Bot-Token aus der Umgebungsvariable
