@@ -121,20 +121,23 @@ async def check_mods():
     # Wenn neue Mods gefunden wurden, sende sie in den Discord-Kanal
     for mod in new_mods:
         embed = discord.Embed(
-            title=mod["name"],
-            description=f"Ersteller: {mod['creator']}",
+            title=mod["label"],  # Der Titel ist jetzt das Label ("NEW!" oder "UPDATE!")
             color=0x00ff00
         )
 
-        # Setze das Bild-URL im Embed
-        if mod["image"]:  # Nur ein Bild hinzufügen, wenn eine gültige URL vorhanden ist
+        # Name des Mods als fett formatierter Text im Beschreibungstext
+        embed.description = f"**{mod['name']}**"  # Der Name des Mods wird fett dargestellt
+
+        # Ersteller des Mods als Feld hinzufügen
+        embed.add_field(name="Ersteller", value=mod['creator'], inline=False)
+
+        # ModHub-Link als Feld hinzufügen
+        embed.add_field(name="Mehr Infos", value=f"[ModHub Link]({mod['link']})", inline=False)
+
+        # Setze das Bild-URL im Embed, wenn vorhanden
+        if mod["image"]:
             embed.set_image(url=mod["image"])
 
-        # Füge das Label hinzu, falls vorhanden
-        if mod["label"]:
-            embed.add_field(name="Label", value=mod["label"], inline=False)
-
-        embed.add_field(name="Mehr Infos", value=f"[ModHub Link]({mod['link']})", inline=False)  # ModHub Link hinzufügen
         await channel.send(embed=embed)
 
     if new_mods:
